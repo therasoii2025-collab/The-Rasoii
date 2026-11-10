@@ -370,8 +370,12 @@ const MLABEL={cash:'Cash',bank:'UPI',card:'Card',apple:'Apple Pay',google:'Googl
 
 /* ---------- Store: shared db when available, in-memory otherwise ---------- */
 const D={orders:[],tables:[],payments:[],reviews:[],menu:[]};
+const LOCAL_STORE_KEY='therasoii_demo_store_v1';
 const store={db:null,mem:false,subs:{},m:{orders:{},tables:{},payments:{},reviews:{},menu:{}},
-  async del(c,id){if(this.db)return this.db.collection(c).doc(id).delete();delete this.m[c][id];this.flush(c);paint()},
+  persistLocal(){
+    try{localStorage.setItem(LOCAL_STORE_KEY,JSON.stringify(this.m));return true}catch(e){return false}
+  },
+  async del(c,id){if(this.db)return this.db.collection(c).doc(id).delete();delete this.m[c][id];this.persistLocal();this.flush(c);paint()},
   async init(onChange){
     try{this.db=await window.claude?.use?.('db')}catch(e){this.db=null}
     for(const c of Object.keys(D)){
@@ -379,11 +383,24 @@ const store={db:null,mem:false,subs:{},m:{orders:{},tables:{},payments:{},review
         this.db.collection(c).onSnapshot(s=>{D[c]=s.docs.map(x=>({id:x.id,...x.data()}));onChange()},()=>{});
       }
     }
-    if(!this.db){this.mem=true;seedMemory();for(const c of Object.keys(D))this.flush(c);onChange()}
+    if(!this.db){
+      this.mem=true;
+      let restored=false;
+      try{
+        const saved=localStorage.getItem(LOCAL_STORE_KEY);
+        if(saved){const parsed=JSON.parse(saved);if(parsed&&typeof parsed==='object'){
+          for(const c of Object.keys(D))this.m[c]=parsed[c]&&typeof parsed[c]==='object'?parsed[c]:{};
+          restored=true;
+        }}
+      }catch(e){}
+      if(!restored){seedMemory();this.persistLocal()}
+      for(const c of Object.keys(D))this.flush(c);
+      onChange();
+    }
   },
   flush(c){D[c]=Object.entries(this.m[c]).map(([id,v])=>({id,...v}))},
-  async set(c,id,v){if(this.db)return this.db.collection(c).doc(id).set(v);this.m[c][id]=v;this.flush(c);paint()},
-  async update(c,id,v){if(this.db)return this.db.collection(c).doc(id).update(v);this.m[c][id]={...(this.m[c][id]||{}),...v};this.flush(c);paint()}
+  async set(c,id,v){if(this.db)return this.db.collection(c).doc(id).set(v);this.m[c][id]=v;this.persistLocal();this.flush(c);paint()},
+  async update(c,id,v){if(this.db)return this.db.collection(c).doc(id).update(v);this.m[c][id]={...(this.m[c][id]||{}),...v};this.persistLocal();this.flush(c);paint()}
 };
 function seedMemory(){
   const now=Date.now(),min=60000,m=store.m;
